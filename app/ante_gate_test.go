@@ -72,6 +72,47 @@ func TestOtherTransactionIsValid(t *testing.T) {
 	require.Equal(t, successCode, resp.Code)
 
 }
+func TestPreventSpamTxWithTwoUsers(t *testing.T) {
+	numberTxsinBlocks := 2
+	config := network.ConfigWithMaxTxsInBlock(uint64(numberTxsinBlocks))
+	net := network.New(t, config)
+	val := net.Validators[0]
+	ctx := val.ClientCtx
+	address, _ := GenerateAddressWithAccount(ctx, t, net)
+	net.WaitForNextBlock()
+	OutRes := make([]testutil.BufferWriter, numberTxsinBlocks+1)
+	for i := 0; i < numberTxsinBlocks+1; i++ {
+		OutRes[i] = executeSendTxCMD(ctx, net.Validators[0].Address.String(), net)
+		fmt.Println(OutRes[i])
+	}
+	res := executeSendTxCMD(ctx, address, net)
+	net.WaitForNextBlock()
+	var resp sdk.TxResponse
+	require.NoError(t, ctx.Codec.UnmarshalJSON(OutRes[numberTxsinBlocks].Bytes(), &resp))
+	require.Equal(t, errCode, resp.Code)
+
+	require.NoError(t, ctx.Codec.UnmarshalJSON(res.Bytes(), &resp))
+	require.Equal(t, successCode, resp.Code)
+
+}
+
+func GenerateAddressWithAccount(ctx client.Context, t *testing.T, net *network.Network) (string, error) {
+	accs := GenerateAddressesInKeyring(ctx.Keyring, 1)
+	common := CommonArgs(net)
+
+	args := []string{net.Validators[0].Address.String(), accs[0].String(), "1000node0token"}
+	args = append(args, common...)
+	out, err := clitestutil.ExecTestCLICmd(ctx, bank.NewSendTxCmd(), args)
+	if err != nil {
+		return "", err
+	}
+	var resp sdk.TxResponse
+	require.NoError(t, ctx.Codec.UnmarshalJSON(out.Bytes(), &resp))
+	if uint32(0) != resp.Code {
+		return "", fmt.Errorf("Error Code Not Success")
+	}
+	return accs[0].String(), nil
+}
 
 func CommonArgs(net *network.Network) []string {
 	return []string{
@@ -105,4 +146,12 @@ func GenerateAddressesInKeyring(ring keyring.Keyring, n int) []sdk.AccAddress {
 		addrs[i] = info.GetAddress()
 	}
 	return addrs
+}
+
+func executeSendTxCMD(ctx client.Context, address string, net *network.Network) testutil.BufferWriter {
+	common := CommonArgs(net)
+	args := []string{address, address, "10stake"}
+	args = append(args, common...)
+	OutRes, _ := clitestutil.ExecTestCLICmd(ctx, bank.NewSendTxCmd(), args)
+	return OutRes
 }
